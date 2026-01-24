@@ -117,10 +117,24 @@ col1_side, col2_side = st.sidebar.columns(2)
 col1_side.metric("Total Lemurs", len(df))
 col2_side.metric("Current View", len(filtered_df))
 
-# Reset Button in Sidebar
+# Initialize depth variable
+connection_depth = 1
+
+# Reset Button & Depth Slider in Sidebar
 if st.session_state.selected_lemur_id:
     st.sidebar.markdown("---")
     st.sidebar.warning(f"Focusing on: **{st.session_state.selected_lemur_id}**")
+
+    # NEW FEATURE: Depth Slider
+    st.sidebar.markdown("**Family Tree Depth**")
+    connection_depth = st.sidebar.slider(
+        "Degrees of Separation",
+        min_value=1,
+        max_value=10,
+        value=3,
+        help="1=Parents/Children, 2=Grandparents/Siblings, 10=Entire Lineage"
+    )
+
     st.sidebar.button("🔄 Reset to Full View", on_click=reset_selection, type="primary")
 
 # --- 5. BUILD BASE NETWORK ---
@@ -136,7 +150,7 @@ for index, row in filtered_df.iterrows():
         title=f"ID: {row['DLC_ID']}\nBorn: {row['Birth_Year']}",
         color=color,
         shape="dot",
-        size=15  # Default size
+        size=15
     )
 
 # Add Edges
@@ -148,7 +162,7 @@ for index, row in filtered_df.iterrows():
     if sire in valid_ids and sire != 'nan': G_full.add_edge(sire, child, color="#BDC3C7")
     if dam in valid_ids and dam != 'nan': G_full.add_edge(dam, child, color="#BDC3C7")
 
-# Calculate Centrality (on full graph so scores are accurate globally)
+# Calculate Centrality
 centrality = nx.degree_centrality(G_full)
 for node, cent_val in centrality.items():
     G_full.nodes[node]['size'] = 15 + (cent_val * 150)
@@ -156,10 +170,15 @@ for node, cent_val in centrality.items():
 # --- 6. APPLY INTERACTIVE FILTER (EGO GRAPH) ---
 # Check if a user selected something
 if st.session_state.selected_lemur_id and st.session_state.selected_lemur_id in G_full.nodes:
-    # EGO GRAPH: Get node + neighbors (radius=1)
-    # underscore=True makes it treat parent/child equally for "connection"
-    G_display = nx.ego_graph(G_full, st.session_state.selected_lemur_id, radius=1, undirected=True)
-    graph_title = f"🔍 Family Focus: {st.session_state.selected_lemur_id}"
+    # EGO GRAPH: Get node + neighbors
+    # radius=connection_depth allows finding 1st, 2nd, 3rd degree connections
+    G_display = nx.ego_graph(
+        G_full,
+        st.session_state.selected_lemur_id,
+        radius=connection_depth,
+        undirected=True
+    )
+    graph_title = f"🔍 Family Focus: {st.session_state.selected_lemur_id} (Radius: {connection_depth})"
 else:
     G_display = G_full
     graph_title = f"🧬 Lineage Network ({selected_years[0]} - {selected_years[1]})"
@@ -198,10 +217,9 @@ with col_leader:
         cent_df = cent_df.reset_index()
 
         leaderboard = pd.merge(cent_df, df[['DLC_ID', 'Name']], on='DLC_ID', how='left').drop_duplicates()
-        leaderboard = leaderboard.sort_values(by='Score', ascending=False).head(15)  # Top 15
+        leaderboard = leaderboard.sort_values(by='Score', ascending=False).head(15)
 
         # INTERACTIVE DATAFRAME
-        # selection_mode='single-row' enables the click
         event = st.dataframe(
             leaderboard[['Name', 'Score', 'DLC_ID']],
             hide_index=True,
@@ -211,23 +229,20 @@ with col_leader:
         )
 
         # HANDLE SELECTION EVENT
-        # 1. Determine what the new selection SHOULD be based on the user's click
         if len(event.selection.rows) > 0:
             selected_index = event.selection.rows[0]
             new_selection = leaderboard.iloc[selected_index]['DLC_ID']
         else:
-            new_selection = None  # User unchecked the box
+            new_selection = None
 
-        # 2. Update Session State ONLY if it changed (avoids infinite loops)
         if st.session_state.selected_lemur_id != new_selection:
             st.session_state.selected_lemur_id = new_selection
-            st.rerun()  # <--- CRITICAL: Forces script to restart so the Graph at the top updates immediately
+            st.rerun()
+
     else:
         st.warning("No data.")
 
-
-# Success Message
 if st.session_state.selected_lemur_id:
-    st.info("💡 **Tip:** Press the 'Reset to Full View' button in the sidebar to return.")
+    st.info("💡 **Tip:** Use the 'Degrees of Separation' slider in the sidebar to expand the family tree.")
 else:
     st.success(f"✅ Loaded {len(filtered_df)} individuals.")
